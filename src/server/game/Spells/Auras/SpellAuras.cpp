@@ -1675,7 +1675,7 @@ void Aura::HandleAuraSpecificMods(AuraApplication const* aurApp, Unit* caster, b
             case SPELLFAMILY_WARRIOR:
                 if (!caster)
                     break;
-                [[fallthrough]]; // TODO: Not sure whether the fallthrough was a mistake (forgetting a break) or intended. This should be double-checked.
+                break;
             case SPELLFAMILY_WARLOCK:
                 if (!caster)
                     break;

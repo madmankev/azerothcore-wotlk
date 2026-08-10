@@ -825,7 +825,7 @@ class spell_warr_t3_prot_8p_bonus : public AuraScript
 
     bool CheckProc(ProcEventInfo& eventInfo)
     {
-        return eventInfo.GetActionTarget() && eventInfo.GetActionTarget()->GetHealthPct() <= 20.0f;
+        return eventInfo.GetActionTarget() != nullptr;
     }
 
     void HandleEffectProc(AuraEffect const* /*aurEff*/, ProcEventInfo& eventInfo)
