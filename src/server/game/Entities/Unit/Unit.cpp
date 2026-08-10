@@ -7188,7 +7188,7 @@ bool Unit::HandleDummyAuraProc(Unit* victim, uint32 damage, AuraEffect* triggere
                     triggered_spell_id = isWrathSpell ? 48518 : 48517;
                     break;
                 }
-                [[fallthrough]]; // TODO: Not sure whether the fallthrough was a mistake (forgetting a break) or intended. This should be double-checked.
+                break;
             }
         case SPELLFAMILY_ROGUE:
             {
@@ -9083,8 +9083,8 @@ bool Unit::HandleProcTriggerSpell(Unit* victim, uint32 damage, AuraEffect* trigg
         // Cheat Death
         case 28845:
             {
-                // When your health drops below 20%
-                if (HealthBelowPctDamaged(20, damage) || HealthBelowPct(20))
+                // Warrior T3 8-piece bonus triggers when the target's health drops to 20% or below after this hit.
+                if (HealthBelowPct(20) || !HealthBelowPctDamaged(20, damage))
                     return false;
                 break;
             }
@@ -9097,7 +9097,7 @@ bool Unit::HandleProcTriggerSpell(Unit* victim, uint32 damage, AuraEffect* trigg
 
                 target = this;
                 trigger_spell_id = 22588;
-                [[fallthrough]]; // TODO: Not sure whether the fallthrough was a mistake (forgetting a break) or intended. This should be double-checked.
+                break;
             }
         // Bonus Healing (Crystal Spire of Karabor mace)
         case 40971:
@@ -13285,6 +13285,7 @@ void Unit::ClearInCombat()
 
     if (Player* player = this->ToPlayer())
     {
+        player->SetLastLeaveCombatTime(GameTime::GetGameTimeMS().count());
         sScriptMgr->OnPlayerLeaveCombat(player);
     }
 }
