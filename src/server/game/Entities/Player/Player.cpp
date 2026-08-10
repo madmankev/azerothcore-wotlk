@@ -178,6 +178,7 @@ Player::Player(WorldSession* session): Unit(true), m_mover(this)
     m_regenTimer = 0;
     m_regenTimerCount = 0;
     m_foodEmoteTimerCount = 0;
+    m_lavaDamageTimer = 0;
     m_weaponChangeTimer = 0;
 
     m_zoneUpdateId = uint32(-1);
@@ -910,29 +911,32 @@ void Player::HandleDrowning(uint32 time_diff)
 
     if (m_MirrorTimerFlags & (UNDERWATER_INLAVA /*| UNDERWATER_INSLIME*/) && !(_lastLiquid && _lastLiquid->SpellId))
     {
-        // Breath timer not activated - activate it
-        if (m_MirrorTimer[FIRE_TIMER] == DISABLED_MIRROR_TIMER)
-            m_MirrorTimer[FIRE_TIMER] = getMaxTimer(FIRE_TIMER);
-        else
+        if (m_lavaDamageTimer > 0)
         {
-            m_MirrorTimer[FIRE_TIMER] -= time_diff;
-            if (m_MirrorTimer[FIRE_TIMER] < 0)
-            {
-                m_MirrorTimer[FIRE_TIMER] += 1 * IN_MILLISECONDS;
-                // Calculate and deal damage
-                // TODO: Check this formula
-                uint32 damage = urand(600, 700);
-                if (m_MirrorTimerFlags & UNDERWATER_INLAVA)
-                    EnvironmentalDamage(DAMAGE_LAVA, damage);
-                // need to skip Slime damage in Undercity,
-                // maybe someone can find better way to handle environmental damage
-                //else if (m_zoneUpdateId != 1497)
-                //    EnvironmentalDamage(DAMAGE_SLIME, damage);
-            }
+            if (m_lavaDamageTimer <= time_diff)
+                m_lavaDamageTimer = 0;
+            else
+                m_lavaDamageTimer -= time_diff;
         }
+
+        if (m_lavaDamageTimer == 0)
+        {
+            // Lava deals a static 600-700 Fire damage roughly every two seconds.
+            uint32 damage = urand(600, 700);
+            if (m_MirrorTimerFlags & UNDERWATER_INLAVA)
+                EnvironmentalDamage(DAMAGE_LAVA, damage);
+            m_lavaDamageTimer = 2020;
+        }
+        // need to skip Slime damage in Undercity,
+        // maybe someone can find better way to handle environmental damage
+        //else if (m_zoneUpdateId != 1497)
+        //    EnvironmentalDamage(DAMAGE_SLIME, damage);
     }
     else
+    {
+        m_lavaDamageTimer = 0;
         m_MirrorTimer[FIRE_TIMER] = DISABLED_MIRROR_TIMER;
+    }
 
     // Recheck timers flag
     m_MirrorTimerFlags &= ~UNDERWATER_EXIST_TIMERS;

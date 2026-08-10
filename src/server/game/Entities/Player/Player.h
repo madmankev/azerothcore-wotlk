@@ -2591,6 +2591,7 @@ public:
     uint32 m_AreaID;
     uint32 m_regenTimerCount;
     uint32 m_foodEmoteTimerCount;
+    uint32 m_lavaDamageTimer;
     float m_powerFraction[MAX_POWERS];
     uint32 m_contestedPvPTimer;
 
