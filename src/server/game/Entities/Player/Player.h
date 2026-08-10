@@ -2422,6 +2422,8 @@ public:
     void SetAuraUpdateMaskForRaid(uint8 slot) { m_auraRaidUpdateMask |= (uint64(1) << slot); }
     Player* GetNextRandomRaidMember(float radius);
     [[nodiscard]] PartyResult CanUninviteFromGroup(ObjectGuid targetPlayerGUID = ObjectGuid::Empty) const;
+    [[nodiscard]] bool RecentlyLeftCombat(uint32 ms = 5 * IN_MILLISECONDS) const;
+    void SetLastLeaveCombatTime(uint32 time) { m_lastLeaveCombatTime = time; }
 
     // Battleground Group System
     void SetBattlegroundOrBattlefieldRaid(Group* group, int8 subgroup = -1);
@@ -2707,6 +2709,7 @@ public:
     uint16 m_additionalSaveTimer; // pussywizard
     uint8 m_additionalSaveMask; // pussywizard
     uint16 m_hostileReferenceCheckTimer; // pussywizard
+    uint32 m_lastLeaveCombatTime{0};
     std::array<ChatFloodThrottle, ChatFloodThrottle::MAX> m_chatFloodData;
     Difficulty m_dungeonDifficulty;
     Difficulty m_raidDifficulty;

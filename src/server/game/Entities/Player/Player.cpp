@@ -193,6 +193,7 @@ Player::Player(WorldSession* session): Unit(true), m_mover(this)
     m_additionalSaveTimer = 0;
     m_additionalSaveMask = 0;
     m_hostileReferenceCheckTimer = 15000;
+    m_lastLeaveCombatTime = 0;
 
     clearResurrectRequestData();
 
@@ -12690,6 +12691,11 @@ Player* Player::GetNextRandomRaidMember(float radius)
     return nearMembers[randTarget];
 }
 
+bool Player::RecentlyLeftCombat(uint32 ms) const
+{
+    return m_lastLeaveCombatTime && GameTime::GetGameTimeMS().count() < m_lastLeaveCombatTime + ms;
+}
+
 PartyResult Player::CanUninviteFromGroup(ObjectGuid targetPlayerGUID) const
 {
     Group const* grp = GetGroup();
@@ -12715,10 +12721,11 @@ PartyResult Player::CanUninviteFromGroup(ObjectGuid targetPlayerGUID) const
         if (grp->isRollLootActive())
             return ERR_PARTY_LFG_BOOT_LOOT_ROLLS;
 
-        // TODO: Should also be sent when anyone has recently left combat, with an aprox ~5 seconds timer.
+        // The kick window remains blocked for a few seconds after a group member leaves combat.
         for (GroupReference const* itr = grp->GetFirstMember(); itr != nullptr; itr = itr->next())
-            if (itr->GetSource() && itr->GetSource()->IsInMap(this) && itr->GetSource()->IsInCombat())
-                return ERR_PARTY_LFG_BOOT_IN_COMBAT;
+            if (Player* member = itr->GetSource())
+                if (member->IsInMap(this) && (member->IsInCombat() || member->RecentlyLeftCombat()))
+                    return ERR_PARTY_LFG_BOOT_IN_COMBAT;
 
         if (Player* target = ObjectAccessor::FindConnectedPlayer(targetPlayerGUID))
         {
