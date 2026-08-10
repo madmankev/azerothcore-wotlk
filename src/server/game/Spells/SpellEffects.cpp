@@ -3323,6 +3323,10 @@ void Spell::EffectWeaponDmg(SpellEffIndex effIndex)
     if (!unitTarget || !unitTarget->IsAlive())
         return;
 
+    // Ranged auto-attacks reset the melee swing timer in 3.3.5.
+    if (m_attackType == RANGED_ATTACK && IsAutoRepeat() && m_caster->GetTypeId() == TYPEID_PLAYER)
+        m_caster->resetAttackTimer(BASE_ATTACK);
+
     // multiple weapon dmg effect workaround
     // execute only the last weapon damage
     // and handle all effects at once

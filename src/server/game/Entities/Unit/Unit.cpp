@@ -2372,6 +2372,10 @@ void Unit::AttackerStateUpdate(Unit* victim, WeaponAttackType attType /*= BASE_A
     if (attType != BASE_ATTACK && attType != OFF_ATTACK)
         return;                                             // ignore ranged case
 
+    // Melee auto-attacks reset the ranged auto-attack swing timer in 3.3.5.
+    if (GetTypeId() == TYPEID_PLAYER)
+        resetAttackTimer(RANGED_ATTACK);
+
     if (!extra && _lastExtraAttackSpell)
     {
         _lastExtraAttackSpell = 0;
