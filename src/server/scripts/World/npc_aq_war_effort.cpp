@@ -465,6 +465,64 @@ public:
         return OnGossipHello(player, creature);
     }
 
+    // The DB has the AQ "More..." repeatable turn-in quests (8493-8531)
+    // but no signet/supply-crate rewards attached. Grant them here based on
+    // the quest's requested item so players receive the historically correct
+    // number of Commendation Signets and one War Effort Supplies crate.
+    bool OnQuestReward(Player* player, Creature* creature, Quest const* quest, uint32 /*opt*/) override
+    {
+        if (!player || !creature || !quest)
+            return false;
+
+        uint32 const qid = quest->GetQuestId();
+        if (qid < 8492 || qid > 8531)
+            return false;
+
+        uint32 requiredItem = 0;
+        for (uint8 i = 0; i < QUEST_ITEM_OBJECTIVES_COUNT; ++i)
+        {
+            if (quest->RequiredItemId[i])
+            {
+                requiredItem = quest->RequiredItemId[i];
+                break;
+            }
+        }
+
+        static std::unordered_map<uint32, uint8> const signetForItem =
+        {
+            { 2840,  1 }, // Copper Bar
+            { 3575,  5 }, // Iron Bar
+            { 12359, 10 }, // Thorium Bar
+            { 3820,  3 }, // Stranglekelp
+            { 8831,  7 }, // Purple Lotus
+            { 8836, 10 }, // Arthas' Tears
+            { 2318,  1 }, // Light Leather
+            { 2319,  3 }, // Medium Leather
+            { 4304,  7 }, // Thick Leather
+            { 1251,  1 }, // Linen Bandage
+            { 6450,  5 }, // Silk Bandage
+            { 14529, 10 }, // Runecloth Bandage
+            { 5095,  3 }, // Rainbow Fin Albacore
+            { 12210, 5 }, // Roast Raptor
+            { 6887,  7 }, // Spotted Yellowtail
+        };
+
+        auto it = signetForItem.find(requiredItem);
+        uint8 signets = (it != signetForItem.end()) ? it->second : 0;
+
+        uint32 const signetItem = (creature->GetFactionTemplateEntry() && creature->GetFactionTemplateEntry()->team == ALLIANCE ? 21436 : 21438);
+        uint32 const crateItem  = 21509;
+
+        if (signets)
+            player->AddItem(signetItem, signets);
+        // The Singed Corestone quest (8530/8531) awards a Field Duty Papers
+        // crate rather than signets; skip item grant for it.
+        if (requiredItem != 20737 && requiredItem != 7076)
+            player->AddItem(crateItem, 1);
+
+        return true;
+    }
+
 private:
     static bool IsExchangeCommander(uint32 entry)
     {
