@@ -26,25 +26,28 @@
  *   item_count         items consumed per turn-in
  *   reward_item        supply-crate item awarded per turn-in (0 = no reward)
  *   reward_count       number of reward items per turn-in
+ *   signet_item        faction commendation signet item (0 = no signet)
+ *   signet_count       signets awarded per repeatable turn-in
  *   world_state        world-state field updated with the new total
  *   goal               total items required to complete this resource
- *   completed_event    optional game_event id enabled when goal is reached
- *   gossip_menu_id     base gossip text shown when greeting the NPC
+ *   completed_event    optional game_event id enabled when the goal is reached
+ *   gossip_menu_id     base gossip text shown on greet
  *   gossip_text_done   gossip text shown once the goal has been reached
- *   faction            0 = neutral, 1 = Alliance, 2 = Horde
+ *   faction            0 neutral, 1 Alliance, 2 Horde
  *
- * A single gossip option per row is offered. Selecting it consumes one stack
- * turn-in, updates the world-state for players in the collector's zone, and
- * fires the completed event once the goal is reached.
+ * A single gossip option per row is offered. Selecting it consumes one
+ * stack turn-in, awards a supply crate and the appropriate number of
+ * Commendation Signets, advances the in-memory progress and pushes the
+ * world-state update to players in the collector's zone. Once a resource
+ * reaches its goal the gossip option is hidden and the optional completion
+ * game event is started.
  *
- * World-state progress is kept in memory and reset on server restart, matching
- * how the 1.9 event was driven on live servers. Server operators can populate
- * the table per realm with the historically accurate item/goal values.
+ * Progress is kept in memory and reset on server restart, matching how the
+ * 1.9 realm-wide war effort was tracked on live servers.
  */
 
 #include "Creature.h"
 #include "GameEventMgr.h"
-#include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
@@ -69,6 +72,8 @@ struct AqWarEffortEntry
     uint32 itemCount;
     uint32 rewardItem;
     uint32 rewardCount;
+    uint32 signetItem;
+    uint32 signetCount;
     uint32 worldState;
     uint32 goal;
     uint16 completedEvent;
@@ -110,7 +115,8 @@ void AqWarEffortMgr::Load()
 
     QueryResult result = WorldDatabase.Query(
         "SELECT creature_id, item_id, item_count, reward_item, reward_count, "
-        "       world_state, goal, completed_event, gossip_menu_id, gossip_text_done, faction "
+        "       signet_item, signet_count, world_state, goal, completed_event, "
+        "       gossip_menu_id, gossip_text_done, faction "
         "FROM creature_aq_war_effort");
 
     if (!result)
@@ -129,12 +135,14 @@ void AqWarEffortMgr::Load()
         entry.itemCount       = fields[2].Get<uint32>();
         entry.rewardItem      = fields[3].Get<uint32>();
         entry.rewardCount     = fields[4].Get<uint32>();
-        entry.worldState      = fields[5].Get<uint32>();
-        entry.goal            = fields[6].Get<uint32>();
-        entry.completedEvent  = fields[7].Get<uint16>();
-        entry.gossipMenuId    = fields[8].Get<uint32>();
-        entry.gossipTextDone  = fields[9].Get<uint32>();
-        entry.faction         = fields[10].Get<uint8>();
+        entry.signetItem      = fields[5].Get<uint32>();
+        entry.signetCount     = fields[6].Get<uint32>();
+        entry.worldState      = fields[7].Get<uint32>();
+        entry.goal            = fields[8].Get<uint32>();
+        entry.completedEvent  = fields[9].Get<uint16>();
+        entry.gossipMenuId    = fields[10].Get<uint32>();
+        entry.gossipTextDone  = fields[11].Get<uint32>();
+        entry.faction         = fields[12].Get<uint8>();
 
         if (!entry.creatureId || !entry.itemId || !entry.itemCount || !entry.worldState || !entry.goal)
         {
@@ -153,6 +161,13 @@ void AqWarEffortMgr::Load()
             LOG_ERROR("sql.sql", "CreatureAqWarEffort: creature {} references unknown reward item {}", entry.creatureId, entry.rewardItem);
             entry.rewardItem = 0;
             entry.rewardCount = 0;
+        }
+
+        if (entry.signetItem && !sObjectMgr->GetItemTemplate(entry.signetItem))
+        {
+            LOG_ERROR("sql.sql", "CreatureAqWarEffort: creature {} references unknown signet item {}", entry.creatureId, entry.signetItem);
+            entry.signetItem = 0;
+            entry.signetCount = 0;
         }
 
         _entries.push_back(entry);
@@ -199,8 +214,8 @@ void AqWarEffortMgr::AddProgress(uint32 worldState, uint32 amount)
 }
 
 /*
- * Gossip NPC. One gossip option per turn-in row. The option id encodes the
- * item id so a single OnGossipSelect handler can dispatch to every row.
+ * Gossip NPC. One gossip option per turn-in row. The option action encodes the
+ * item id so a single OnGossipSelect handler can dispatch every row.
  */
 class npc_aq_war_effort_collector : public CreatureScript
 {
@@ -212,7 +227,6 @@ public:
         if (!creature || !player)
             return false;
 
-        // The collectors are only present while the war effort event is active.
         if (!sGameEventMgr->IsActiveEvent(AQ_WAR_EFFORT_GAME_EVENT))
             return false;
 
@@ -220,8 +234,10 @@ public:
         if (entries.empty())
             return false;
 
-        uint32 menuId = entries.front()->gossipMenuId;
-        SendGossipMenuFor(player, menuId ? menuId : player->GetGossipTextId(creature), creature->GetGUID());
+        SendGossipMenuFor(player,
+                          entries.front()->gossipMenuId ? entries.front()->gossipMenuId
+                                                        : player->GetGossipTextId(creature),
+                          creature->GetGUID());
 
         for (AqWarEffortEntry const* entry : entries)
         {
@@ -232,7 +248,7 @@ public:
             if (!item)
                 continue;
 
-            std::string gossipText = Acore::StringFormat("Turn in {}x {}", entry->itemCount, item->Name1);
+            std::string const gossipText = Acore::StringFormat("Turn in {}x {}", entry->itemCount, item->Name1);
             AddGossipItemFor(player, GOSSIP_ICON_CHAT, gossipText,
                              GOSSIP_SENDER_TURN_IN, entry->itemId);
         }
@@ -248,8 +264,8 @@ public:
         if (sender != GOSSIP_SENDER_TURN_IN)
             return true;
 
-        uint32 const itemId = action;
-        AqWarEffortEntry const* entry = AqWarEffortMgr::instance()->GetEntry(creature->GetEntry(), itemId);
+        AqWarEffortEntry const* entry =
+            AqWarEffortMgr::instance()->GetEntry(creature->GetEntry(), action);
         if (!entry)
             return true;
 
@@ -260,29 +276,26 @@ public:
         }
 
         if (!player->HasItemCount(entry->itemId, entry->itemCount, true))
-        {
-            // Not enough items in inventory or bank; close without consuming.
             return true;
-        }
 
         player->DestroyItemCount(entry->itemId, entry->itemCount, true);
 
         if (entry->rewardItem && entry->rewardCount)
             player->AddItem(entry->rewardItem, entry->rewardCount);
 
+        if (entry->signetItem && entry->signetCount)
+            player->AddItem(entry->signetItem, entry->signetCount);
+
         bool wasComplete = AqWarEffortMgr::instance()->IsComplete(entry->worldState);
         AqWarEffortMgr::instance()->AddProgress(entry->worldState, entry->itemCount);
-        bool isComplete = AqWarEffortMgr::instance()->IsComplete(entry->worldState);
+        bool isComplete  = AqWarEffortMgr::instance()->IsComplete(entry->worldState);
 
-        // Push the updated progress to anyone near the collector so the bar
-        // advances for players watching the world state.
-        uint32 const progress = AqWarEffortMgr::instance()->GetProgress(entry->worldState);
-        BroadcastWorldState(creature, entry->worldState, progress);
+        BroadcastWorldState(creature, entry->worldState,
+                            AqWarEffortMgr::instance()->GetProgress(entry->worldState));
 
         if (!wasComplete && isComplete && entry->completedEvent)
             sGameEventMgr->StartEvent(entry->completedEvent, true);
 
-        // Refresh the menu so the option disappears when the goal is reached.
         ClearGossipMenuFor(player);
         return OnGossipHello(player, creature);
     }
@@ -290,6 +303,9 @@ public:
 private:
     static void BroadcastWorldState(Creature const* creature, uint32 worldState, uint32 value)
     {
+        if (!creature || !worldState)
+            return;
+
         WorldPacket data(SMSG_UPDATE_WORLD_STATE, 8);
         data << uint32(worldState);
         data << uint32(value);
