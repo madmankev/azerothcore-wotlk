@@ -48,6 +48,7 @@
 
 #include "Creature.h"
 #include "GameEventMgr.h"
+#include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
@@ -390,12 +391,52 @@ private:
 class world_aq_war_effort : public WorldScript
 {
 public:
-    world_aq_war_effort() : WorldScript("world_aq_war_effort") { }
+    world_aq_war_effort() : WorldScript("world_aq_war_effort"), _updateTimer(0) { }
 
     void OnStartup() override
     {
         AqWarEffortMgr::instance()->Load();
     }
+
+    void OnUpdate(uint32 diff) override
+    {
+        // Periodically make the War Effort commanders give a status yell so
+        // players in the capitals see progress announcements even when no one
+        // is turning in. Throttle heavily to avoid chat spam.
+        _updateTimer += diff;
+        if (_updateTimer < 5 * MINUTE * IN_MILLISECONDS)
+            return;
+        _updateTimer = 0;
+
+        if (!sGameEventMgr->IsActiveEvent(AQ_WAR_EFFORT_GAME_EVENT))
+            return;
+
+        Announce(15701); // Field Marshal Snowfall (Alliance)
+        Announce(15700); // Warlord Gorchuk (Horde)
+    }
+
+private:
+    static void Announce(uint32 entry)
+    {
+        for (auto const& pair : ObjectAccessor::GetPlayers())
+        {
+            Player* player = pair.second;
+            if (!player || !player->IsInWorld())
+                continue;
+
+            // Only yell at players in the commander's city.
+            uint32 const zone = (entry == 15701) ? 1537 /* Ironforge */
+                                                 : 1637 /* Orgrimmar */;
+            if (player->GetZoneId() != zone)
+                continue;
+
+            if (Creature* commander = player->FindNearestCreature(entry, 200.0f, true))
+                commander->Yell("The war effort continues! Bring your supplies to the quartermasters. Steel, leather, herbs, bandages - we need them all!", LANG_UNIVERSAL);
+            break;
+        }
+    }
+
+    uint32 _updateTimer;
 };
 
 void AddSC_aq_war_effort()
