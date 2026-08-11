@@ -131,6 +131,10 @@ class spell_warl_shadowflame : public SpellScript
     }
 };
 
+// 6358 - Seduction (Succubus)
+// Tooltip says "Only works against Humanoids." Keep the existing aura handler
+// for the Tier 5 4-piece bonus and add a cast check so non-humanoids and demons
+// are rejected before the Succubus wastes the cast.
 class spell_warl_seduction : public AuraScript
 {
     PrepareAuraScript(spell_warl_seduction);
@@ -153,6 +157,28 @@ class spell_warl_seduction : public AuraScript
     void Register() override
     {
         OnEffectApply += AuraEffectApplyFn(spell_warl_seduction::HandleAuraApply, EFFECT_0, SPELL_AURA_MOD_STUN, AURA_EFFECT_HANDLE_REAL);
+    }
+};
+
+class spell_warl_seduction_spell : public SpellScript
+{
+    PrepareSpellScript(spell_warl_seduction_spell);
+
+    SpellCastResult CheckTarget()
+    {
+        Unit* target = GetExplTargetUnit();
+        // Players always count as humanoid for Seduction; creatures must be
+        // of creature type HUMANOID. This also blocks demons / undead etc.
+        if (!target)
+            return SPELL_FAILED_BAD_TARGETS;
+        if (target->GetTypeId() == TYPEID_UNIT && target->GetCreatureType() != CREATURE_TYPE_HUMANOID)
+            return SPELL_FAILED_BAD_TARGETS;
+        return SPELL_CAST_OK;
+    }
+
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(spell_warl_seduction_spell::CheckTarget);
     }
 };
 
@@ -1274,6 +1300,7 @@ void AddSC_warlock_spell_scripts()
     RegisterSpellScript(spell_warl_eye_of_kilrogg);
     RegisterSpellScript(spell_warl_shadowflame);
     RegisterSpellScript(spell_warl_seduction);
+    RegisterSpellScript(spell_warl_seduction_spell);
     RegisterSpellScript(spell_warl_improved_demonic_tactics);
     RegisterSpellScript(spell_warl_ritual_of_summoning);
     RegisterSpellScript(spell_warl_demonic_aegis);

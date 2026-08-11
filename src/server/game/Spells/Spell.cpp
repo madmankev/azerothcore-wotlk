@@ -2470,20 +2470,18 @@ void Spell::AddUnitTarget(Unit* target, uint32 effectMask, bool checkIfValid /*=
 
         m_spellFlags |= SPELL_FLAG_REFLECTED;
 
-        // HACK: workaround check for succubus seduction case
-        // TODO: seduction should be casted only on humanoids (not demons)
+        // If a Succubus's Seduction is reflected back onto the demon, she is not
+        // a humanoid, so the cast has to be aborted (Seduction only works on
+        // humanoids). Soothing Kiss (icon 694) is unaffected and can be reflected.
         if (m_caster->IsPet())
         {
-            CreatureTemplate const* ci = sObjectMgr->GetCreatureTemplate(m_caster->GetEntry());
-            switch (ci->family)
+            if (CreatureTemplate const* ci = sObjectMgr->GetCreatureTemplate(m_caster->GetEntry()))
             {
-                case CREATURE_FAMILY_SUCCUBUS:
-                    {
-                        if (m_spellInfo->SpellIconID != 694) // Soothing Kiss
-                            cancel();
-                    }
-                    break;
-                    return;
+                if (ci->family == CREATURE_FAMILY_SUCCUBUS &&
+                    m_spellInfo->Id == 6358)
+                {
+                    cancel();
+                }
             }
         }
     }
