@@ -62,7 +62,14 @@ enum AqWarEffortMisc
 {
     AQ_WAR_EFFORT_GAME_EVENT = 22,
 
-    GOSSIP_SENDER_TURN_IN = 1,
+    GOSSIP_SENDER_TURN_IN  = 1,
+    GOSSIP_SENDER_EXCHANGE = 2,
+
+    SUPPLIES_CRATE_ILVL_10 = 21509,
+    SUPPLIES_CRATE_ILVL_20 = 21510,
+    SUPPLIES_CRATE_ILVL_30 = 21511,
+    SUPPLIES_CRATE_ILVL_40 = 21512,
+    SUPPLIES_CRATE_ILVL_50 = 21513,
 };
 
 struct AqWarEffortEntry
@@ -231,13 +238,21 @@ public:
             return false;
 
         auto entries = AqWarEffortMgr::instance()->GetEntriesForCreature(creature->GetEntry());
-        if (entries.empty())
+        bool const hasExchange = IsExchangeCommander(creature->GetEntry());
+        if (entries.empty() && !hasExchange)
             return false;
 
-        SendGossipMenuFor(player,
-                          entries.front()->gossipMenuId ? entries.front()->gossipMenuId
-                                                        : player->GetGossipTextId(creature),
-                          creature->GetGUID());
+        if (!entries.empty())
+        {
+            SendGossipMenuFor(player,
+                              entries.front()->gossipMenuId ? entries.front()->gossipMenuId
+                                                            : player->GetGossipTextId(creature),
+                              creature->GetGUID());
+        }
+        else
+        {
+            SendGossipMenuFor(player, player->GetGossipTextId(creature), creature->GetGUID());
+        }
 
         for (AqWarEffortEntry const* entry : entries)
         {
@@ -253,6 +268,15 @@ public:
                              GOSSIP_SENDER_TURN_IN, entry->itemId);
         }
 
+        if (hasExchange)
+        {
+            AddGossipItemFor(player, GOSSIP_ICON_VENDOR, "Exchange 5 Signets for War Effort Supplies",  GOSSIP_SENDER_EXCHANGE, 5);
+            AddGossipItemFor(player, GOSSIP_ICON_VENDOR, "Exchange 10 Signets for War Effort Supplies", GOSSIP_SENDER_EXCHANGE, 10);
+            AddGossipItemFor(player, GOSSIP_ICON_VENDOR, "Exchange 15 Signets for War Effort Supplies", GOSSIP_SENDER_EXCHANGE, 15);
+            AddGossipItemFor(player, GOSSIP_ICON_VENDOR, "Exchange 20 Signets for War Effort Supplies", GOSSIP_SENDER_EXCHANGE, 20);
+            AddGossipItemFor(player, GOSSIP_ICON_VENDOR, "Exchange 30 Signets for War Effort Supplies", GOSSIP_SENDER_EXCHANGE, 30);
+        }
+
         return true;
     }
 
@@ -260,6 +284,13 @@ public:
     {
         if (!player || !creature)
             return true;
+
+        if (sender == GOSSIP_SENDER_EXCHANGE)
+        {
+            HandleExchange(player, creature, action);
+            ClearGossipMenuFor(player);
+            return OnGossipHello(player, creature);
+        }
 
         if (sender != GOSSIP_SENDER_TURN_IN)
             return true;
@@ -301,6 +332,44 @@ public:
     }
 
 private:
+    static bool IsExchangeCommander(uint32 entry)
+    {
+        return entry == 15700 || entry == 15701;
+    }
+
+    static uint32 GetExchangeSignetItem(uint32 entry)
+    {
+        if (entry == 15700)
+            return 21438;
+        if (entry == 15701)
+            return 21436;
+        return 0;
+    }
+
+    static void HandleExchange(Player* player, Creature const* creature, uint32 signets)
+    {
+        uint32 const signetItem = GetExchangeSignetItem(creature->GetEntry());
+        if (!signetItem)
+            return;
+
+        uint32 crate = 0;
+        switch (signets)
+        {
+            case 5:  crate = SUPPLIES_CRATE_ILVL_10; break;
+            case 10: crate = SUPPLIES_CRATE_ILVL_20; break;
+            case 15: crate = SUPPLIES_CRATE_ILVL_30; break;
+            case 20: crate = SUPPLIES_CRATE_ILVL_40; break;
+            case 30: crate = SUPPLIES_CRATE_ILVL_50; break;
+            default: return;
+        }
+
+        if (!player->HasItemCount(signetItem, signets, true))
+            return;
+
+        player->DestroyItemCount(signetItem, signets, true);
+        player->AddItem(crate, 1);
+    }
+
     static void BroadcastWorldState(Creature const* creature, uint32 worldState, uint32 value)
     {
         if (!creature || !worldState)
