@@ -29,8 +29,17 @@ public:
     void Load();
     void Save();
 
+    // Called by the caravan script when a faction's supply caravan
+    // reaches Cenarion Hold. When both factions have arrived (or the
+    // first one if the other was already complete) the phase advances
+    // from TRANSIT to WAR.
+    void NotifyCaravanArrived(TeamId team);
+
+    bool CaravanArrived(TeamId team) const { return _caravanArrived[team]; }
+
 private:
     uint8 _phase = PHASE_GATHERING;
+    bool  _caravanArrived[2] = { false, false };
 };
 
 #define sAqWarEffortMgr AqWarEffortMgr::instance()

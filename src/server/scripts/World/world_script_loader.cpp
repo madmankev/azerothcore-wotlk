@@ -34,6 +34,7 @@ void AddSC_npc_stave_of_ancients();
 void AddSC_server_mail();
 void AddSC_aq_scarab_gong();
 void AddSC_aq_war_effort();
+void AddSC_aq_war_effort_caravan();
 void AddSC_aq_war_effort_war();
 
 // The name of this function should match:
@@ -58,5 +59,6 @@ void AddWorldScripts()
     AddSC_server_mail();
     AddSC_aq_scarab_gong();
     AddSC_aq_war_effort();
+    AddSC_aq_war_effort_caravan();
     AddSC_aq_war_effort_war();
 }

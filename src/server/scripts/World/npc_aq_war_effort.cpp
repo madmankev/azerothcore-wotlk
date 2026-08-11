@@ -261,6 +261,9 @@ void AqWarEffortMgr::SetPhase(AqWarEffortPhase phase, bool announce)
     _phase = phase;
     _phaseEnd = 0;
 
+    if (phase == PHASE_GATHERING)
+        _caravanArrived[0] = _caravanArrived[1] = false;
+
     switch (phase)
     {
         case PHASE_TRANSIT:
@@ -288,6 +291,18 @@ void AqWarEffortMgr::SetPhase(AqWarEffortPhase phase, bool announce)
     }
 
     Save();
+}
+
+void AqWarEffortMgr::NotifyCaravanArrived(TeamId team)
+{
+    if (team >= TEAM_NEUTRAL)
+        return;
+
+    _caravanArrived[team] = true;
+
+    // The 10-hour war begins once both faction caravans have arrived.
+    if (_caravanArrived[TEAM_ALLIANCE] && _caravanArrived[TEAM_HORDE])
+        SetPhase(PHASE_WAR);
 }
 
 void AqWarEffortMgr::CheckAllComplete()
