@@ -32,6 +32,7 @@ void AddSC_action_ip_logger(); // location: scripts\World\action_ip_logger.cpp
 void AddSC_player_scripts();
 void AddSC_npc_stave_of_ancients();
 void AddSC_server_mail();
+void AddSC_aq_scarab_gong();
 void AddSC_aq_war_effort();
 void AddSC_aq_war_effort_war();
 
@@ -55,6 +56,7 @@ void AddWorldScripts()
     AddSC_player_scripts();
     AddSC_npc_stave_of_ancients();
     AddSC_server_mail();
+    AddSC_aq_scarab_gong();
     AddSC_aq_war_effort();
     AddSC_aq_war_effort_war();
 }

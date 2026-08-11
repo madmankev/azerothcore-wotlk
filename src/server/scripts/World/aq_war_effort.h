@@ -14,6 +14,7 @@ enum AqWarEffortPhase : uint8
     PHASE_TRANSIT   = 1,
     PHASE_WAR       = 2,
     PHASE_COMPLETE  = 3,
+    PHASE_OPEN      = 4,   // Scarab Gong has been rung
 };
 
 class AqWarEffortMgr
