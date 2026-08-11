@@ -16,38 +16,23 @@
  */
 
 /*
- * AQ War Effort - resource turn-in framework.
+ * AQ War Effort - resource turn-in framework and post-collection phases.
  *
- * Instead of hard-coding every War Effort resource/quest into the core, each
- * collector NPC is described by a row in `creature_aq_war_effort`:
+ * Phase state machine:
  *
- *   creature_id        NPC entry of the collector
- *   item_id            item handed in
- *   item_count         items consumed per turn-in
- *   reward_item        supply-crate item awarded per turn-in (0 = no reward)
- *   reward_count       number of reward items per turn-in
- *   signet_item        faction commendation signet item (0 = no signet)
- *   signet_count       signets awarded per repeatable turn-in
- *   world_state        world-state field updated with the new total
- *   goal               total items required to complete this resource
- *   completed_event    optional game_event id enabled when the goal is reached
- *   gossip_menu_id     base gossip text shown on greet
- *   gossip_text_done   gossip text shown once the goal has been reached
- *   faction            0 neutral, 1 Alliance, 2 Horde
+ *   GATHERING  - both factions are still turning in resources
+ *   TRANSIT    - all resources collected; 5-day caravan to Silithus
+ *   WAR        - caravan arrived; 10-hour Qiraji war around the Scarab Gong
+ *   COMPLETE   - 10-hour war ended; gong/ringing available
  *
- * A single gossip option per row is offered. Selecting it consumes one
- * stack turn-in, awards a supply crate and the appropriate number of
- * Commendation Signets, advances the in-memory progress and pushes the
- * world-state update to players in the collector's zone. Once a resource
- * reaches its goal the gossip option is hidden and the optional completion
- * game event is started.
- *
- * Progress is kept in memory and reset on server restart, matching how the
- * 1.9 realm-wide war effort was tracked on live servers.
+ * The state is persisted in `aq_war_effort_save`. The actual Qiraji war
+ * spawns in zone_silithus (npc_qiraj_war_spawn / npc_anachronos_quest_trigger)
+ * are started by WAR- and COMPLETE-phase hooks.
  */
 
 #include "Creature.h"
 #include "GameEventMgr.h"
+#include "MapMgr.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
@@ -58,6 +43,7 @@
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include <unordered_map>
+#include <unordered_set>
 
 enum AqWarEffortMisc
 {
@@ -71,6 +57,22 @@ enum AqWarEffortMisc
     SUPPLIES_CRATE_ILVL_30 = 21511,
     SUPPLIES_CRATE_ILVL_40 = 21512,
     SUPPLIES_CRATE_ILVL_50 = 21513,
+
+    NPC_WARLORD_GORCHUK        = 15700,
+    NPC_FIELD_MARSHAL_SNOWFALL = 15701,
+    NPC_ANACHRONOS_TRIGGER     = 15426,
+
+    // Phase durations (ms). Can be overridden by operators for testing.
+    TRANSIT_DURATION_MS = 5 * DAY * IN_MILLISECONDS,
+    WAR_DURATION_MS     = 10 * HOUR * IN_MILLISECONDS,
+};
+
+enum AqWarEffortPhase : uint8
+{
+    PHASE_GATHERING = 0,
+    PHASE_TRANSIT   = 1,
+    PHASE_WAR       = 2,
+    PHASE_COMPLETE  = 3,
 };
 
 struct AqWarEffortEntry
@@ -96,6 +98,8 @@ public:
     static AqWarEffortMgr* instance();
 
     void Load();
+    void Save();
+
     std::vector<AqWarEffortEntry const*> GetEntriesForCreature(uint32 creatureId) const;
     AqWarEffortEntry const* GetEntry(uint32 creatureId, uint32 itemId) const;
 
@@ -103,9 +107,20 @@ public:
     bool   IsComplete(uint32 worldState) const;
     void   AddProgress(uint32 worldState, uint32 amount);
 
+    AqWarEffortPhase GetPhase() const { return _phase; }
+    time_t           GetPhaseEnd() const { return _phaseEnd; }
+
+    void SetPhase(AqWarEffortPhase phase, bool announce = true);
+    void Update(uint32 diff);
+
 private:
+    void CheckAllComplete();
+
     std::vector<AqWarEffortEntry> _entries;
     std::unordered_map<uint32, uint32> _progress; // worldState -> items collected
+
+    AqWarEffortPhase _phase = PHASE_GATHERING;
+    time_t           _phaseEnd = 0;
 };
 
 AqWarEffortMgr* AqWarEffortMgr::instance()
@@ -118,71 +133,97 @@ void AqWarEffortMgr::Load()
 {
     _entries.clear();
     _progress.clear();
+    _phase = PHASE_GATHERING;
+    _phaseEnd = 0;
 
     uint32 oldMSTime = getMSTime();
 
-    QueryResult result = WorldDatabase.Query(
+    if (QueryResult result = WorldDatabase.Query(
         "SELECT creature_id, item_id, item_count, reward_item, reward_count, "
         "       signet_item, signet_count, world_state, goal, completed_event, "
         "       gossip_menu_id, gossip_text_done, faction "
-        "FROM creature_aq_war_effort");
+        "FROM creature_aq_war_effort"))
+    {
+        do
+        {
+            Field* fields = result->Fetch();
 
-    if (!result)
+            AqWarEffortEntry entry;
+            entry.creatureId      = fields[0].Get<uint32>();
+            entry.itemId          = fields[1].Get<uint32>();
+            entry.itemCount       = fields[2].Get<uint32>();
+            entry.rewardItem      = fields[3].Get<uint32>();
+            entry.rewardCount     = fields[4].Get<uint32>();
+            entry.signetItem      = fields[5].Get<uint32>();
+            entry.signetCount     = fields[6].Get<uint32>();
+            entry.worldState      = fields[7].Get<uint32>();
+            entry.goal            = fields[8].Get<uint32>();
+            entry.completedEvent  = fields[9].Get<uint16>();
+            entry.gossipMenuId    = fields[10].Get<uint32>();
+            entry.gossipTextDone  = fields[11].Get<uint32>();
+            entry.faction         = fields[12].Get<uint8>();
+
+            if (!entry.creatureId || !entry.itemId || !entry.itemCount || !entry.worldState || !entry.goal)
+            {
+                LOG_ERROR("sql.sql", "CreatureAqWarEffort: skipping invalid row creature {} item {}", entry.creatureId, entry.itemId);
+                continue;
+            }
+
+            if (!sObjectMgr->GetItemTemplate(entry.itemId))
+            {
+                LOG_ERROR("sql.sql", "CreatureAqWarEffort: creature {} references unknown item {}", entry.creatureId, entry.itemId);
+                continue;
+            }
+
+            if (entry.rewardItem && !sObjectMgr->GetItemTemplate(entry.rewardItem))
+            {
+                LOG_ERROR("sql.sql", "CreatureAqWarEffort: creature {} references unknown reward item {}", entry.creatureId, entry.rewardItem);
+                entry.rewardItem = 0;
+                entry.rewardCount = 0;
+            }
+
+            if (entry.signetItem && !sObjectMgr->GetItemTemplate(entry.signetItem))
+            {
+                LOG_ERROR("sql.sql", "CreatureAqWarEffort: creature {} references unknown signet item {}", entry.creatureId, entry.signetItem);
+                entry.signetItem = 0;
+                entry.signetCount = 0;
+            }
+
+            _entries.push_back(entry);
+        } while (result->NextRow());
+    }
+    else
     {
         LOG_WARN("server.loading", ">> Loaded 0 AQ war effort turn-in definitions. DB table `creature_aq_war_effort` is empty.");
-        return;
     }
-
-    do
-    {
-        Field* fields = result->Fetch();
-
-        AqWarEffortEntry entry;
-        entry.creatureId      = fields[0].Get<uint32>();
-        entry.itemId          = fields[1].Get<uint32>();
-        entry.itemCount       = fields[2].Get<uint32>();
-        entry.rewardItem      = fields[3].Get<uint32>();
-        entry.rewardCount     = fields[4].Get<uint32>();
-        entry.signetItem      = fields[5].Get<uint32>();
-        entry.signetCount     = fields[6].Get<uint32>();
-        entry.worldState      = fields[7].Get<uint32>();
-        entry.goal            = fields[8].Get<uint32>();
-        entry.completedEvent  = fields[9].Get<uint16>();
-        entry.gossipMenuId    = fields[10].Get<uint32>();
-        entry.gossipTextDone  = fields[11].Get<uint32>();
-        entry.faction         = fields[12].Get<uint8>();
-
-        if (!entry.creatureId || !entry.itemId || !entry.itemCount || !entry.worldState || !entry.goal)
-        {
-            LOG_ERROR("sql.sql", "CreatureAqWarEffort: skipping invalid row creature {} item {}", entry.creatureId, entry.itemId);
-            continue;
-        }
-
-        if (!sObjectMgr->GetItemTemplate(entry.itemId))
-        {
-            LOG_ERROR("sql.sql", "CreatureAqWarEffort: creature {} references unknown item {}", entry.creatureId, entry.itemId);
-            continue;
-        }
-
-        if (entry.rewardItem && !sObjectMgr->GetItemTemplate(entry.rewardItem))
-        {
-            LOG_ERROR("sql.sql", "CreatureAqWarEffort: creature {} references unknown reward item {}", entry.creatureId, entry.rewardItem);
-            entry.rewardItem = 0;
-            entry.rewardCount = 0;
-        }
-
-        if (entry.signetItem && !sObjectMgr->GetItemTemplate(entry.signetItem))
-        {
-            LOG_ERROR("sql.sql", "CreatureAqWarEffort: creature {} references unknown signet item {}", entry.creatureId, entry.signetItem);
-            entry.signetItem = 0;
-            entry.signetCount = 0;
-        }
-
-        _entries.push_back(entry);
-    } while (result->NextRow());
 
     LOG_INFO("server.loading", ">> Loaded {} AQ war effort turn-in definitions in {} ms",
              uint32(_entries.size()), GetMSTimeDiffToNow(oldMSTime));
+
+    // Load persisted phase.
+    if (QueryResult save = WorldDatabase.Query(
+        "SELECT phase, phase_end FROM aq_war_effort_save LIMIT 1"))
+    {
+        Field* f = save->Fetch();
+        _phase    = AqWarEffortPhase(f[0].Get<uint8>());
+        _phaseEnd = time_t(f[1].Get<uint32>());
+
+        if (_phase == PHASE_TRANSIT && _phaseEnd <= time(nullptr))
+        {
+            SetPhase(PHASE_WAR);
+        }
+        else if (_phase == PHASE_WAR && _phaseEnd <= time(nullptr))
+        {
+            SetPhase(PHASE_COMPLETE);
+        }
+    }
+}
+
+void AqWarEffortMgr::Save()
+{
+    WorldDatabase.DirectExecute("TRUNCATE TABLE aq_war_effort_save");
+    WorldDatabase.Execute("INSERT INTO aq_war_effort_save (phase, phase_end) VALUES ({}, {})",
+                          uint32(_phase), uint32(_phaseEnd));
 }
 
 std::vector<AqWarEffortEntry const*> AqWarEffortMgr::GetEntriesForCreature(uint32 creatureId) const
@@ -221,9 +262,76 @@ void AqWarEffortMgr::AddProgress(uint32 worldState, uint32 amount)
     _progress[worldState] += amount;
 }
 
+void AqWarEffortMgr::SetPhase(AqWarEffortPhase phase, bool announce)
+{
+    if (_phase == phase)
+        return;
+
+    _phase = phase;
+    _phaseEnd = 0;
+
+    switch (phase)
+    {
+        case PHASE_TRANSIT:
+            _phaseEnd = time(nullptr) + TRANSIT_DURATION_MS / IN_MILLISECONDS;
+            if (announce)
+            {
+                // Both factions have finished; materiel is being shipped to Silithus.
+                sWorld->SendWorldText(11146); // Alliance commander yell
+                sWorld->SendWorldText(11148); // Horde commander yell
+            }
+            break;
+        case PHASE_WAR:
+            _phaseEnd = time(nullptr) + WAR_DURATION_MS / IN_MILLISECONDS;
+            // The 10-hour war has begun; spawns are handled by
+            // npc_anachronos_quest_trigger in zone_silithus.
+            if (announce)
+                sWorld->SendWorldText(11427);
+            break;
+        case PHASE_COMPLETE:
+            if (announce)
+                sWorld->SendWorldText(11427);
+            break;
+        default:
+            break;
+    }
+
+    Save();
+}
+
+void AqWarEffortMgr::CheckAllComplete()
+{
+    if (_phase != PHASE_GATHERING || _entries.empty())
+        return;
+
+    std::unordered_set<uint32> states;
+    for (AqWarEffortEntry const& e : _entries)
+        states.insert(e.worldState);
+
+    for (uint32 state : states)
+        if (!IsComplete(state))
+            return;
+
+    SetPhase(PHASE_TRANSIT);
+}
+
+void AqWarEffortMgr::Update(uint32 /*diff*/)
+{
+    if (_phase == PHASE_TRANSIT || _phase == PHASE_WAR)
+    {
+        if (_phaseEnd && _phaseEnd <= time(nullptr))
+        {
+            if (_phase == PHASE_TRANSIT)
+                SetPhase(PHASE_WAR);
+            else
+                SetPhase(PHASE_COMPLETE);
+        }
+    }
+}
+
 /*
- * Gossip NPC. One gossip option per turn-in row. The option action encodes the
- * item id so a single OnGossipSelect handler can dispatch every row.
+ * Gossip NPC. One gossip option per turn-in row plus signet exchanges
+ * for the two commanders.
  */
 class npc_aq_war_effort_collector : public CreatureScript
 {
@@ -238,8 +346,15 @@ public:
         if (!sGameEventMgr->IsActiveEvent(AQ_WAR_EFFORT_GAME_EVENT))
             return false;
 
+        AqWarEffortPhase const phase = AqWarEffortMgr::instance()->GetPhase();
+
         auto entries = AqWarEffortMgr::instance()->GetEntriesForCreature(creature->GetEntry());
         bool const hasExchange = IsExchangeCommander(creature->GetEntry());
+
+        // During WAR/COMPLETE the collectors still accept signet exchanges
+        // but resource turn-ins are closed.
+        bool const canTurnIn = phase == PHASE_GATHERING;
+
         if (entries.empty() && !hasExchange)
             return false;
 
@@ -250,23 +365,26 @@ public:
                                                             : player->GetGossipTextId(creature),
                               creature->GetGUID());
         }
-        else
+        else if (hasExchange)
         {
             SendGossipMenuFor(player, player->GetGossipTextId(creature), creature->GetGUID());
         }
 
-        for (AqWarEffortEntry const* entry : entries)
+        if (canTurnIn)
         {
-            if (AqWarEffortMgr::instance()->IsComplete(entry->worldState))
-                continue;
+            for (AqWarEffortEntry const* entry : entries)
+            {
+                if (AqWarEffortMgr::instance()->IsComplete(entry->worldState))
+                    continue;
 
-            ItemTemplate const* item = sObjectMgr->GetItemTemplate(entry->itemId);
-            if (!item)
-                continue;
+                ItemTemplate const* item = sObjectMgr->GetItemTemplate(entry->itemId);
+                if (!item)
+                    continue;
 
-            std::string const gossipText = Acore::StringFormat("Turn in {}x {}", entry->itemCount, item->Name1);
-            AddGossipItemFor(player, GOSSIP_ICON_CHAT, gossipText,
-                             GOSSIP_SENDER_TURN_IN, entry->itemId);
+                std::string const gossipText = Acore::StringFormat("Turn in {}x {}", entry->itemCount, item->Name1);
+                AddGossipItemFor(player, GOSSIP_ICON_CHAT, gossipText,
+                                 GOSSIP_SENDER_TURN_IN, entry->itemId);
+            }
         }
 
         if (hasExchange)
@@ -295,6 +413,13 @@ public:
 
         if (sender != GOSSIP_SENDER_TURN_IN)
             return true;
+
+        // Turn-ins are only valid during GATHERING.
+        if (AqWarEffortMgr::instance()->GetPhase() != PHASE_GATHERING)
+        {
+            CloseGossipMenuFor(player);
+            return true;
+        }
 
         AqWarEffortEntry const* entry =
             AqWarEffortMgr::instance()->GetEntry(creature->GetEntry(), action);
@@ -328,6 +453,8 @@ public:
         if (!wasComplete && isComplete && entry->completedEvent)
             sGameEventMgr->StartEvent(entry->completedEvent, true);
 
+        AqWarEffortMgr::instance()->CheckAllComplete();
+
         ClearGossipMenuFor(player);
         return OnGossipHello(player, creature);
     }
@@ -335,14 +462,14 @@ public:
 private:
     static bool IsExchangeCommander(uint32 entry)
     {
-        return entry == 15700 || entry == 15701;
+        return entry == NPC_WARLORD_GORCHUK || entry == NPC_FIELD_MARSHAL_SNOWFALL;
     }
 
     static uint32 GetExchangeSignetItem(uint32 entry)
     {
-        if (entry == 15700)
+        if (entry == NPC_WARLORD_GORCHUK)
             return 21438;
-        if (entry == 15701)
+        if (entry == NPC_FIELD_MARSHAL_SNOWFALL)
             return 21436;
         return 0;
     }
@@ -391,52 +518,72 @@ private:
 class world_aq_war_effort : public WorldScript
 {
 public:
-    world_aq_war_effort() : WorldScript("world_aq_war_effort"), _updateTimer(0) { }
+    world_aq_war_effort() : WorldScript("world_aq_war_effort"), _announceTimer(0) { }
 
     void OnStartup() override
     {
         AqWarEffortMgr::instance()->Load();
     }
 
+    void OnShutdown() override
+    {
+        AqWarEffortMgr::instance()->Save();
+    }
+
+    void OnAfterUnloadAllMaps() override
+    {
+        AqWarEffortMgr::instance()->Save();
+    }
+
     void OnUpdate(uint32 diff) override
     {
-        // Periodically make the War Effort commanders give a status yell so
-        // players in the capitals see progress announcements even when no one
-        // is turning in. Throttle heavily to avoid chat spam.
-        _updateTimer += diff;
-        if (_updateTimer < 5 * MINUTE * IN_MILLISECONDS)
-            return;
-        _updateTimer = 0;
+        AqWarEffortMgr* mgr = AqWarEffortMgr::instance();
 
-        if (!sGameEventMgr->IsActiveEvent(AQ_WAR_EFFORT_GAME_EVENT))
-            return;
+        if (mgr->GetPhase() == PHASE_GATHERING)
+        {
+            _announceTimer += diff;
+            if (_announceTimer < 5 * MINUTE * IN_MILLISECONDS)
+                return;
+            _announceTimer = 0;
 
-        Announce(15701); // Field Marshal Snowfall (Alliance)
-        Announce(15700); // Warlord Gorchuk (Horde)
+            if (!sGameEventMgr->IsActiveEvent(AQ_WAR_EFFORT_GAME_EVENT))
+                return;
+
+            Announce(NPC_FIELD_MARSHAL_SNOWFALL, 1537);
+            Announce(NPC_WARLORD_GORCHUK, 1637);
+            return;
+        }
+
+        if (mgr->GetPhase() == PHASE_TRANSIT || mgr->GetPhase() == PHASE_WAR)
+        {
+            time_t const end = mgr->GetPhaseEnd();
+            if (end && end <= time(nullptr))
+            {
+                if (mgr->GetPhase() == PHASE_TRANSIT)
+                    mgr->SetPhase(PHASE_WAR);
+                else
+                    mgr->SetPhase(PHASE_COMPLETE);
+            }
+        }
     }
 
 private:
-    static void Announce(uint32 entry)
+    static void Announce(uint32 entry, uint32 zone)
     {
         for (auto const& pair : ObjectAccessor::GetPlayers())
         {
             Player* player = pair.second;
             if (!player || !player->IsInWorld())
                 continue;
-
-            // Only yell at players in the commander's city.
-            uint32 const zone = (entry == 15701) ? 1537 /* Ironforge */
-                                                 : 1637 /* Orgrimmar */;
             if (player->GetZoneId() != zone)
                 continue;
-
             if (Creature* commander = player->FindNearestCreature(entry, 200.0f, true))
                 commander->Yell("The war effort continues! Bring your supplies to the quartermasters. Steel, leather, herbs, bandages - we need them all!", LANG_UNIVERSAL);
             break;
         }
     }
 
-    uint32 _updateTimer;
+    uint32 _announceTimer;
 };
 
 void AddSC_aq_war_effort()
