@@ -4160,11 +4160,19 @@ void Player::UpdateSoulboundTradeItems()
 
 void Player::AddTradeableItem(Item* item)
 {
+    if (!item)
+        return;
+
     std::lock_guard<std::mutex> guard(m_soulboundTradableLock);
+    // An item must never appear in the tradeable list twice; otherwise
+    // RemoveTradeableItem would only erase one occurrence and leave stale
+    // pointers that could later be touched after the item was destroyed.
+    for (Item* tradeable : m_itemSoulboundTradeable)
+        if (tradeable == item)
+            return;
     m_itemSoulboundTradeable.push_back(item);
 }
 
-//TODO: should never allow an item to be added to m_itemSoulboundTradeable twice
 void Player::RemoveTradeableItem(Item* item)
 {
     std::lock_guard<std::mutex> guard(m_soulboundTradableLock);
