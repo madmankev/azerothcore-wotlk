@@ -42,6 +42,7 @@
 #include "StringFormat.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
+#include "aq_war_effort.h"
 #include <unordered_map>
 #include <unordered_set>
 
@@ -65,14 +66,6 @@ enum AqWarEffortMisc
     // Phase durations (ms). Can be overridden by operators for testing.
     TRANSIT_DURATION_MS = 5 * DAY * IN_MILLISECONDS,
     WAR_DURATION_MS     = 10 * HOUR * IN_MILLISECONDS,
-};
-
-enum AqWarEffortPhase : uint8
-{
-    PHASE_GATHERING = 0,
-    PHASE_TRANSIT   = 1,
-    PHASE_WAR       = 2,
-    PHASE_COMPLETE  = 3,
 };
 
 struct AqWarEffortEntry
@@ -106,18 +99,16 @@ public:
     uint32 GetProgress(uint32 worldState) const;
     bool   IsComplete(uint32 worldState) const;
     void   AddProgress(uint32 worldState, uint32 amount);
+    void   CheckAllComplete();
 
     AqWarEffortPhase GetPhase() const { return _phase; }
     time_t           GetPhaseEnd() const { return _phaseEnd; }
-
     void SetPhase(AqWarEffortPhase phase, bool announce = true);
     void Update(uint32 diff);
 
 private:
-    void CheckAllComplete();
-
     std::vector<AqWarEffortEntry> _entries;
-    std::unordered_map<uint32, uint32> _progress; // worldState -> items collected
+    std::unordered_map<uint32, uint32> _progress;
 
     AqWarEffortPhase _phase = PHASE_GATHERING;
     time_t           _phaseEnd = 0;
