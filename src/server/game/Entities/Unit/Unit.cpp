@@ -8649,7 +8649,13 @@ bool Unit::HandleProcTriggerSpell(Unit* victim, uint32 damage, AuraEffect* trigg
                 }
                 else if (auraSpellInfo->Id == 71761) // Deep Freeze Immunity State (only permanent)
                 {
-                    Creature* creature = victim->ToCreature();
+                    // Only Deep Freeze (44572) should trigger this damage effect, and only on
+                    // creatures with permanent stun immunity (bosses). Other mage spells must not
+                    // proc it regardless of the misconfigured spell family mask.
+                    if (!procSpell || procSpell->Id != 44572)
+                        return false;
+
+                    Creature* creature = victim ? victim->ToCreature() : nullptr;
                     if (!creature || !creature->HasMechanicTemplateImmunity(1 << (MECHANIC_STUN - 1)))
                         return false;
                 }
