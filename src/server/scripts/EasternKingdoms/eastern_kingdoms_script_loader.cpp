@@ -62,6 +62,7 @@ void AddSC_boss_chromaggus();
 void AddSC_boss_nefarian();
 void AddSC_instance_blackwing_lair();
 void AddSC_boss_mr_smite();
+void AddSC_boss_vancleef();
 void AddSC_instance_deadmines();             //Deadmines
 void AddSC_instance_gnomeregan();            //Gnomeregan
 void AddSC_instance_karazhan();              //Karazhan
@@ -213,6 +214,7 @@ void AddEasternKingdomsScripts()
     AddSC_boss_nefarian();
     AddSC_instance_blackwing_lair();
     AddSC_boss_mr_smite();
+    AddSC_boss_vancleef();
     AddSC_instance_deadmines();             //Deadmines
     AddSC_instance_gnomeregan();            //Gnomeregan
     AddSC_instance_karazhan();              //Karazhan
