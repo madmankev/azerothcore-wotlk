@@ -1,18 +1,5 @@
 /*
- * This file is part of the AzerothCore Project. See AUTHORS file for Copyright information
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Affero General Public License as published by the
- * Free Software Foundation; either version 3 of the License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program. If not, see <http://www.gnu.org/licenses/>.
+ * Deadmines instance script.
  */
 
 #include "InstanceScript.h"
@@ -22,22 +9,23 @@
 class instance_deadmines : public InstanceMapScript
 {
 public:
-    instance_deadmines() : InstanceMapScript("instance_deadmines", 36) { }
+    instance_deadmines() : InstanceMapScript(DeadminesScriptName, 36) { }
 
     struct instance_deadmines_InstanceMapScript : public InstanceScript
     {
         instance_deadmines_InstanceMapScript(Map* map) : InstanceScript(map)
         {
+            Initialize();
         }
 
-        void Initialize() override
+        void Initialize()
         {
             memset(&_encounters, 0, sizeof(_encounters));
         }
 
-        void OnGameObjectCreate(GameObject* gameobject) override
+        void OnGameObjectCreate(GameObject* go) override
         {
-            switch (gameobject->GetEntry())
+            switch (go->GetEntry())
             {
                 case GO_HEAVY_DOOR_1:
                 case GO_HEAVY_DOOR_2:
@@ -45,41 +33,76 @@ public:
                 case GO_DOOR_LEVER_2:
                 case GO_DOOR_LEVER_3:
                 case GO_CANNON:
-                    gameobject->UpdateSaveToDb(true);
+                    go->UpdateSaveToDb(true);
                     break;
                 case GO_FACTORY_DOOR:
-                    gameobject->UpdateSaveToDb(true);
+                    go->UpdateSaveToDb(true);
                     if (_encounters[TYPE_RHAHK_ZOR] == DONE)
-                        gameobject->SetGoState(GO_STATE_ACTIVE);
+                        go->SetGoState(GO_STATE_ACTIVE);
                     break;
                 case GO_IRON_CLAD_DOOR:
-                    gameobject->UpdateSaveToDb(true);
-                    if (gameobject->GetStateSavedOnInstance() == GO_STATE_ACTIVE)
-                    {
-                        gameobject->DespawnOrUnsummon();
-                    }
+                    go->UpdateSaveToDb(true);
+                    if (go->GetStateSavedOnInstance() == GO_STATE_ACTIVE)
+                        go->DespawnOrUnsummon();
+                    break;
+            }
+        }
+
+        void OnCreatureCreate(Creature* creature) override
+        {
+            switch (creature->GetEntry())
+            {
+                case NPC_RHAHK_ZOR:
+                case NPC_SNEED:
+                case NPC_SNEEDS_SHREDDER:
+                case NPC_GILNID:
+                case NPC_MR_SMITE:
+                case NPC_CAPTAIN_GREENSKIN:
+                case NPC_EDWIN_VANCLEEF:
+                case NPC_COOKIE:
+                    creature->SetFullHealth();
+                    break;
+                default:
                     break;
             }
         }
 
         void SetData(uint32 type, uint32 data) override
         {
-            switch (type)
+            if (type < MAX_ENCOUNTERS)
             {
-                case TYPE_RHAHK_ZOR:
-                case TYPE_CANNON:
-                    _encounters[type] = data;
-                    break;
-            }
+                _encounters[type] = data;
 
-            if (data == DONE)
-                SaveToDB();
+                // Open doors and spawn adds when bosses die.
+                if (data == DONE)
+                {
+                    switch (type)
+                    {
+                        case TYPE_RHAHK_ZOR:
+                            HandleGameObject(GO_FACTORY_DOOR, true);
+                            break;
+                        case TYPE_SMITE:
+                            HandleGameObject(GO_IRON_CLAD_DOOR, true);
+                            break;
+                        default:
+                            break;
+                    }
+                    SaveToDB();
+                }
+            }
+        }
+
+        uint32 GetData(uint32 type) const override
+        {
+            return (type < MAX_ENCOUNTERS) ? _encounters[type] : 0;
         }
 
         std::string GetSaveData() override
         {
             std::ostringstream saveStream;
-            saveStream << "D E " << _encounters[0] << ' ' << _encounters[1];
+            saveStream << "D E";
+            for (uint8 i = 0; i < MAX_ENCOUNTERS; ++i)
+                saveStream << ' ' << _encounters[i];
             return saveStream.str();
         }
 
@@ -88,10 +111,10 @@ public:
             if (!in)
                 return;
 
-            char dataHead1, dataHead2;
+            char head1, head2;
             std::istringstream loadStream(in);
-            loadStream >> dataHead1 >> dataHead2;
-            if (dataHead1 == 'D' && dataHead2 == 'E')
+            loadStream >> head1 >> head2;
+            if (head1 == 'D' && head2 == 'E')
             {
                 for (uint8 i = 0; i < MAX_ENCOUNTERS; ++i)
                 {

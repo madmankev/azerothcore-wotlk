@@ -63,6 +63,12 @@ void AddSC_boss_nefarian();
 void AddSC_instance_blackwing_lair();
 void AddSC_boss_mr_smite();
 void AddSC_boss_vancleef();
+void AddSC_boss_rhahkzor();
+void AddSC_boss_sneed();
+void AddSC_boss_gilnid();
+void AddSC_boss_greenskin();
+void AddSC_boss_cookie();
+void AddSC_boss_cannon();
 void AddSC_instance_deadmines();             //Deadmines
 void AddSC_instance_gnomeregan();            //Gnomeregan
 void AddSC_instance_karazhan();              //Karazhan
@@ -215,6 +221,12 @@ void AddEasternKingdomsScripts()
     AddSC_instance_blackwing_lair();
     AddSC_boss_mr_smite();
     AddSC_boss_vancleef();
+    AddSC_boss_rhahkzor();
+    AddSC_boss_sneed();
+    AddSC_boss_gilnid();
+    AddSC_boss_greenskin();
+    AddSC_boss_cookie();
+    AddSC_boss_cannon();
     AddSC_instance_deadmines();             //Deadmines
     AddSC_instance_gnomeregan();            //Gnomeregan
     AddSC_instance_karazhan();              //Karazhan

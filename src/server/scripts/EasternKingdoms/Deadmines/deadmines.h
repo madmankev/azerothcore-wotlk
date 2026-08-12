@@ -26,7 +26,12 @@ enum DataTypes
 {
     TYPE_RHAHK_ZOR              = 0,
     TYPE_CANNON                 = 1,
-    MAX_ENCOUNTERS              = 2
+    TYPE_SNEED                  = 2,
+    TYPE_GILNID                 = 3,
+    TYPE_SMITE                  = 4,
+    TYPE_GREENSKIN              = 5,
+    TYPE_VANCLEEF               = 6,
+    MAX_ENCOUNTERS              = 7
 };
 
 enum GameObjects
@@ -39,6 +44,23 @@ enum GameObjects
     GO_DOOR_LEVER_2             = 101833,
     GO_DOOR_LEVER_3             = 101834,
     GO_CANNON                   = 16398,
+};
+
+enum Creatures
+{
+    NPC_RHAHK_ZOR               = 644,
+    NPC_SNEEDS_SHREDDER         = 642,
+    NPC_SNEED                   = 643,
+    NPC_GILNID                  = 1763,
+    NPC_MR_SMITE                = 646,
+    NPC_CAPTAIN_GREENSKIN       = 647,
+    NPC_EDWIN_VANCLEEF          = 639,
+    NPC_COOKIE                  = 645,
+    NPC_DEFIAS_BLACKGUARD       = 636,
+    NPC_DEFIAS_WIZARD           = 449,
+    NPC_DEFIAS_EVOKER           = 450,
+    NPC_DEFIAS_OVERSEER         = 634,
+    NPC_DEFIAS_PIRATE           = 636,
 };
 
 template <class AI, class T>
